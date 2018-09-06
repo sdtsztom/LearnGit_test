@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>jump</title>
+	<meta charset="UTF-8">
+	<script type="text/javascript">
+		var objApp = window.external;
+		var objDatabase = objApp.Database;
+		var cat_ctr=objApp.Window.CategoryCtrl;
+		var err_msg='';
+
+		function deal(this_form){
+			var search_str=this_form.search_str.value;
+			var msg_dom=document.getElementById("msg");
+			var flag_search=search(search_str);
+			if(!flag_search&&err_msg!='')print_err();
+			return false;
+
+/*			var location='/My Notes/今日笔记'
+			var folder = objDatabase.GetFolderByLocation(location, false);
+			cat_ctr.SelectedFolder=folder;*/
+
+/*			var folder_collection=objDatabase.Folders;
+			var folders_len=folder_collection.Count;
+			var content='';
+			for(var i=0;i<folders_len;++i){
+				var path = folder_collection.Item(i).Location;
+				content+=path+'\n';
+			}
+			document.write(content);*/
+
+/*			var folder_collection=objDatabase.AllLocations;
+			document.write(folder_collection);*/
+		}
+
+		function print_err(){
+			objWindow.ShowMessage(err_msg,'error',0x40);
+		}
+
+		function get_doc_content(){
+			var doc_collection=objDatabase.DocumentsFromTitle('set_effi_tool',1);
+			if(doc_collection){
+				var set_doc=doc_collection.Item(0);
+				var doc_content=set_doc.GetText(1000);
+				return doc_content;
+			}else{
+				err_msg='can not find set file!';
+				return 0;
+			}
+		}
+
+		function get_set_content(){
+			var doc_content=get_doc_content();
+			if(doc_content){
+				var jump_index=doc_content.indexOf('[jump]',0);
+				if(jump_index==-1)return '';
+				var doc_len=doc_content.length;
+				return doc_content.substr(jump_index,doc_len);
+			}else return 0;
+		}
+
+		function fast_jump(set_content,search_str){
+			if(search_str.indexOf(' ',0)!=-1)return 0;
+			var sign_index=set_content.indexOf(search_str,0);
+			if(sign_index!=-1){
+				var loc_start=set_content.indexOf('=',sign_index)+1;
+				var loc_end=set_content.indexOf('\'',sign_index);
+				var loc=set_content.substr(loc_start,loc_end-loc_start);
+				if(loc.indexOf(' ')!=-1)loc=loc.replace(/ /g,'');
+				if(loc.indexOf('#')!=-1)loc=loc.replace('#',' ');
+				var folder=objDatabase.GetFolderByLocation(loc,false);
+				if(folder){
+					cat_ctr.SelectedFolder=folder;
+					return 1;
+				}
+				else{
+					err_msg='fast_jump:can not find any matched folder';
+					return 0;
+				}
+			}else {
+				err_msg='fast_jump:can not find any matched sign!';
+				return 0;
+			}
+		}
+
+		function jump(search_str){
+			var folder_collection=objDatabase.AllLocations;
+
+			search_str=search_str.toLowerCase();
+
+			var search_str_array=search_str.split(' ');
+			var single_folder_index;
+			var single_search_str_index;
+			for(single_folder_index in folder_collection){
+				var single_folder=folder_collection[single_folder_index].toLowerCase();
+				not_match_exist=false;
+				for(single_search_str_index in search_str_array){
+					var single_search_str=search_str_array[single_search_str_index];
+					if(single_folder.indexOf(single_search_str)==-1){
+						not_match_exist=true;
+						break;
+					}
+				}
+				if(!not_match_exist){
+					Jump_to_folder(single_folder);
+					return 1;
+				}
+			}
+			return 0;
+		}
+
+		function Jump_to_folder(folder_loc){
+			var folder = objDatabase.GetFolderByLocation(folder_loc, false);
+			cat_ctr.SelectedFolder=folder;
+		}
+
+		function search(search_str){
+			var set_content=get_set_content();
+			var flag_fast_jump=fast_jump(set_content,search_str);
+			if(flag_fast_jump)return 1;
+			else{
+				var flag_jump=jump(search_str);
+				if(flag_jump)return 1;
+				else return 0;
+			}
+		}
+	</script>
+</head>
+<body>
+	<form name="form0" action="jump.html" onsubmit="return deal(this)" method="post">
+		<input type='text' name="search_str" autofocus="autofocus">
+		<input type='submit' value='跳转' onsubmit=function>
+	</form>
+	<p id='msg'></p>
+</body>
+</html>
