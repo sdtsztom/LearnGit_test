@@ -7,13 +7,21 @@
 		var objApp = window.external;
 		var objDatabase = objApp.Database;
 		var cat_ctr=objApp.Window.CategoryCtrl;
-		var err_msg='';
+
+		function print_err(err_msg){
+			objWindow.ShowMessage(err_msg,'error',0x40);
+		}
+
+		function convert2blankspace(str){
+			if(str.indexOf(' ')!=-1)str=str.replace(/ /g,'');
+			if(str.indexOf('#')!=-1)str=str.replace('#',' ');
+			return str;	
+		}
 
 		function deal(this_form){
 			var search_str=this_form.search_str.value;
 			var msg_dom=document.getElementById("msg");
-			var flag_search=search(search_str);
-			if(!flag_search&&err_msg!='')print_err();
+			var flag_search=exec_jump(search_str);
 			return false;
 
 /*			var location='/My Notes/今日笔记'
@@ -33,96 +41,132 @@
 			document.write(folder_collection);*/
 		}
 
-		function print_err(){
-			objWindow.ShowMessage(err_msg,'error',0x40);
-		}
-
-		function get_doc_content(){
+		function get_setdoc(){
 			var doc_collection=objDatabase.DocumentsFromTitle('set_effi_tool',1);
 			if(doc_collection){
 				var set_doc=doc_collection.Item(0);
-				var doc_content=set_doc.GetText(1000);
-				return doc_content;
-			}else{
-				err_msg='can not find set file!';
-				return 0;
-			}
+				var set_doc_content=set_doc.GetText(1000);
+				return set_doc_content;
+			}else{print_err('can not find set file!');return 0;}
 		}
 
-		function get_set_content(){
-			var doc_content=get_doc_content();
-			if(doc_content){
-				var jump_index=doc_content.indexOf('[jump]',0);
+		function get_rules_content(rule_type){
+			if(rule_type!='jump')return 0;
+			var set_doc_content=get_setdoc();
+			if(set_doc_content){
+				var jump_index=set_doc_content.indexOf('[jump]',0);
 				if(jump_index==-1)return '';
-				var doc_len=doc_content.length;
-				return doc_content.substr(jump_index,doc_len);
-			}else return 0;
+				var rules_content=set_doc_content.substring(jump_index,set_doc_content.length);
+				return rules_content;
+			}else{print_err('invalid set_doc_content!');return 0;}
 		}
 
-		function fast_jump(set_content,search_str){
-			if(search_str.indexOf(' ',0)!=-1)return 0;
-			var sign_index=set_content.indexOf(search_str,0);
-			if(sign_index!=-1){
-				var loc_start=set_content.indexOf('=',sign_index)+1;
-				var loc_end=set_content.indexOf('\'',sign_index);
-				var loc=set_content.substr(loc_start,loc_end-loc_start);
-				if(loc.indexOf(' ')!=-1)loc=loc.replace(/ /g,'');
-				if(loc.indexOf('#')!=-1)loc=loc.replace('#',' ');
-				var folder=objDatabase.GetFolderByLocation(loc,false);
-				if(folder){
-					cat_ctr.SelectedFolder=folder;
-					return 1;
-				}
-				else{
-					err_msg='fast_jump:can not find any matched folder';
-					return 0;
-				}
-			}else {
-				err_msg='fast_jump:can not find any matched sign!';
-				return 0;
+		function gen_rules_map(rules_content){
+			var rules_map=new Map();
+			var index=0;
+			var eq,key_start,value_end;
+			while(true){
+				key_start=rules_content.indexOf('\'',index)+1;
+				if(!key_start)break;
+				eq=rules_content.indexOf('=',key_start);
+				value_end=rules_content.indexOf('\'',eq);
+				rules_map.set(convert2blankspace(rules_content.substring(key_start,eq)),convert2blankspace(rules_content.substring(eq+1,value_end)));
+				index=value_end+1;
 			}
+			return rules_map;
 		}
 
-		function jump(search_str){
+		function fast_jump(rules_map,search_str){
+			var folder_loc=rules_map.get(search_str);
+			if(folder_loc==undefined)return 0;
+			else return folder_loc;
+		}
+
+		function match_all(folder,search_str_array){
+			folder=folder.toLowerCase();
+			var match_all=true;
+			for(var i in search_str_array){
+				if(folder.indexOf(search_str_array[i])==-1){
+					match_all=false;
+					break;
+				}
+			}
+			return match_all;
+		}
+
+
+		function drop_unnecessary_tail(folder,search_str_array){
+			var best_matched_folder=folder;
+
+			while(true){
+				split_sign=folder.lastIndexOf('/',folder.length-1);
+				folder=folder.substring(0,split_sign);
+				var if_match_all=match_all(folder,search_str_array);
+				if(!if_match_all)break;
+				else best_matched_folder=folder;
+			}
+			return best_matched_folder;
+		}
+
+		function start_with(str1,str2){
+			if(str1.substring(0,str2.length)==str2)return true;
+			else return false;
+		}
+
+		function normal_jump(search_str){
 			var folder_collection=objDatabase.AllLocations;
-
 			search_str=search_str.toLowerCase();
-
 			var search_str_array=search_str.split(' ');
-			var single_folder_index;
-			var single_search_str_index;
-			for(single_folder_index in folder_collection){
-				var single_folder=folder_collection[single_folder_index].toLowerCase();
-				not_match_exist=false;
-				for(single_search_str_index in search_str_array){
-					var single_search_str=search_str_array[single_search_str_index];
-					if(single_folder.indexOf(single_search_str)==-1){
-						not_match_exist=true;
-						break;
+
+			/*var best_matched_folder='';
+			var best_matched_folder_length=10000;	//模拟infinit
+
+			for(var i in folder_collection){
+				var folder=folder_collection[i].toLowerCase();
+				var if_match_all=match_all(folder,search_str_array);
+				if(if_match_all&&folder.length<best_matched_folder_length){
+					best_matched_folder=folder;
+					best_matched_folder_length=folder.length;
+				}
+			}*/
+
+			var best_matched_folder='';
+			var best_matched_folder_length=10000; //模拟infinite
+
+			for(var i in folder_collection){
+				var folder=folder_collection[i];
+				if(best_matched_folder!=''&&start_with(folder,best_matched_folder))continue;
+				var if_match_all=match_all(folder,search_str_array);
+				if(if_match_all){
+					folder=drop_unnecessary_tail(folder,search_str_array);
+					if(folder.length<best_matched_folder_length){
+						best_matched_folder=folder;
+						best_matched_folder_length=folder.length;
 					}
 				}
-				if(!not_match_exist){
-					Jump_to_folder(single_folder);
-					return 1;
-				}
 			}
-			return 0;
+
+			if(best_matched_folder==''){print_err('no matched key!');return 0;}
+			else return best_matched_folder;
 		}
 
-		function Jump_to_folder(folder_loc){
+		function jump_to_folder(folder_loc){
 			var folder = objDatabase.GetFolderByLocation(folder_loc, false);
 			cat_ctr.SelectedFolder=folder;
 		}
 
-		function search(search_str){
-			var set_content=get_set_content();
-			var flag_fast_jump=fast_jump(set_content,search_str);
-			if(flag_fast_jump)return 1;
-			else{
-				var flag_jump=jump(search_str);
-				if(flag_jump)return 1;
-				else return 0;
+		function exec_jump(search_str){
+			var rules_content=get_rules_content('jump');
+			var folder_loc=0;
+			if(search_str.indexOf(' ',0)==-1){	//有空格的搜索字符串应使用normal_jump，因此直接结束fast_jump
+				var rules_map=gen_rules_map(rules_content);
+				folder_loc=fast_jump(rules_map,search_str);	
 			}
+			if(!folder_loc)folder_loc=normal_jump(search_str);
+			if(folder_loc){
+				jump_to_folder(folder_loc);
+				return 1;
+			}else return 0;
 		}
 	</script>
 </head>

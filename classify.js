@@ -2,113 +2,105 @@
 var objDatabase=objApp.Database;
 var objWindow=objApp.Window;
 var cur_doc=objWindow.CurrentDocument;
-var err_msg='';
 
-function print_err(){
+function print_err(err_msg){
 	objWindow.ShowMessage(err_msg,'error',0x40);
 }
 
-function get_sign(){
-	var cur_title=cur_doc.Title ;
-	var index=cur_title.indexOf('-',0);
-	if(index!=-1)return cur_title.substr(0,index);
-	else{
-		err_msg='can not find \'-\' in the title';
-		return 0;
-	}
+function convert2blankspace(str){
+	if(str.indexOf(' ')!=-1)str=str.replace(/ /g,'');
+	if(str.indexOf('#')!=-1)str=str.replace('#',' ');
+	return str;	
 }
 
-function get_doc_content(){
+function get_setdoc(){
 	var doc_collection=objDatabase.DocumentsFromTitle('set_effi_tool',1);
 	if(doc_collection){
 		var set_doc=doc_collection.Item(0);
-		var doc_content=set_doc.GetText(1000);
-		return doc_content;
-	}else{
-		err_msg='can not find set file!';
-		return 0;
-	}
+		var set_doc_content=set_doc.GetText(1000);
+		return set_doc_content;
+	}else{print_err('cannot find the set file!');return 0;}
 }
 
-function get_set_content(set_type){
-	if(set_type!='classify')return 0;
-	var doc_content=get_doc_content();
-	if(doc_content){
-		var classify_index=doc_content.indexOf('[classify]',0);
-		var jump_index=doc_content.indexOf('[jump]',0);
+function get_rules_content(rule_type){
+	if(rule_type!='classify')return 0;
+	var set_doc_content=get_setdoc();
+	if(set_doc_content){
+		var classify_index=set_doc_content.indexOf('[classify]',0);
+		var jump_index=set_doc_content.indexOf('[jump]',0);
 		if(classify_index==-1)return '';
 		else{
-			var set_content='';
-			if(jump_index==-1)set_content=doc_content;
-			else set_content=doc_content.substr(classify_index,jump_index-classify_index);
-			return set_content;
+			var rules_content='';
+			if(jump_index==-1)rules_content=set_doc_content;
+			else rules_content=set_doc_content.substring(classify_index,jump_index);
+			return rules_content;
 		}
-	}else{
-		err_msg='blank set file content!';
-		return 0;
-	}
+	}else{print_err('invalid set_doc_content!');return 0;}
 }
 
-function move(set_content,sign){
-	var sign_index=set_content.indexOf(sign,0);
-	var loc='';
-	if(sign_index!=-1){
-		var loc_start=set_content.indexOf('=',sign_index)+1;
-		var loc_end=set_content.indexOf(';',sign_index);
-		var loc=set_content.substr(loc_start,loc_end-loc_start);
-		if(loc.indexOf(' ')!=-1)loc=loc.replace(/ /g,'');
-		if(loc.indexOf('#')!=-1)loc=loc.replace('#',' ');
-		var folder=objDatabase.GetFolderByLocation(loc,false);
+function gen_rules_map(rules_content){
+	var rules_map=new Map();
+	var index=0;
+	var eq,key_start,value_end;
+	while(true){
+		key_start=rules_content.indexOf('\'',index)+1;
+		if(!key_start)break;
+		eq=rules_content.indexOf('=',key_start);
+		value_end=rules_content.indexOf('\'',eq);
+		rules_map.set(convert2blankspace(rules_content.substring(key_start,eq)),convert2blankspace(rules_content.substring(eq+1,value_end)));
+		index=value_end+1;
+	}
+	return rules_map;
+}
+
+function move(rules_map,title){
+	var best_matched_key='';
+	var best_matched_key_length=0;
+
+	for(var key of rules_map.keys()){
+		if(key.length>best_matched_key_length&&title.indexOf(key,0)!=-1){
+			best_matched_key=key;
+			best_matched_key_length=key.length;
+		}
+	}
+
+	if(best_matched_key_length!=''){
+		var folder=objDatabase.GetFolderByLocation(rules_map.get(best_matched_key),false);
 		if(folder){
 			cur_doc.MoveTo(folder);
-			return 1;
-		}else{
-			err_msg='can not find any matched folder!';
-			return 0;
+			return best_matched_key;
+		}else{print_err('cannot find folder by best_matched_key!');return 0;}
+	}else{print_err('no matched key!');return 0;}
+}
+
+function remove_key(title,key){
+	var start=key.length;
+	var end=title.length;
+	cur_doc.Title=title.substring(start,end);
+}
+
+
+function exec_classify(title){
+	var rules_content=get_rules_content('classify');
+	if(rules_content){
+		var rules_map=gen_rules_map(rules_content);
+		var if_remove_key=false;
+		if(title[0]=='@'){
+			if_remove_key=true;
+			title=title.substr(1,title.length-1);
 		}
-	}else{
-		err_msg='can not find any matched sign!';
-		return 0;
-	}
-}
-
-function remove_sign(sign){
-	var title=cur_doc.Title;
-	var real_title_start=sign.length+2;
-	var real_title_end=title.length;
-	cur_doc.Title=title.substr(real_title_start,real_title_end-real_title_start);
-}
-
-
-function exec_classify(){
-	var set_content=get_set_content('classify');
-	if(set_content){
-		var sign=get_sign();
-		if(sign){
-			var if_remove_sign=false;
-			if(sign[0]=='@'){
-				if_remove_sign=true;
-				sign=sign.substr(1,sign.length-1);
-			}
-			if(set_content!=''&&sign!=''){
-				var flag_move=move(set_content,sign);
-				if(flag_move){
-					if(if_remove_sign)remove_sign(sign);
-					return 1;
-				}else return 0;
-			}else{
-				err_msg='blank set_content or sign!';
-				return 0;
-			}
-		}else return 0;
-	}else return 0;
+		if(rules_content!=''&&title!=''){
+			var best_matched_key=move(rules_map,title);
+			if(best_matched_key){
+				if(if_remove_key)remove_key(title,best_matched_key);
+				return 1;
+			}else{print_err('invalid best_matched_key!');return 0;}
+		}else{print_err('blank rules_content or title!');return 0;}
+	}else{print_err('invalid rules_content!');return 0;}
 }
 
 if(cur_doc){
-	var flag_exec=exec_classify();
-	if(!flag_exec)print_err();
-}
-else{
-	err_msg='no current_doc!';
-	print_err();
-}
+	var title=cur_doc.Title;
+	if(title) var flag_exec=exec_classify(title);
+	else print_err('invalid title!');
+}else print_err('invalid current_doc!');
